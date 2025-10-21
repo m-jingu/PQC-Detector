@@ -1,0 +1,176 @@
+# TLS Supported Groups mapping
+# Based on Wireshark packet-tls-utils.c ssl_extension_curves[] array
+# Format: {id: {name: "GroupName", is_pqc: boolean}}
+
+# Standard ECDH groups (RFC 8446, RFC 8422)
+1: {name: "sect163k1", is_pqc: false}
+2: {name: "sect163r1", is_pqc: false}
+3: {name: "sect163r2", is_pqc: false}
+4: {name: "sect193r1", is_pqc: false}
+5: {name: "sect193r2", is_pqc: false}
+6: {name: "sect233k1", is_pqc: false}
+7: {name: "sect233r1", is_pqc: false}
+8: {name: "sect239k1", is_pqc: false}
+9: {name: "sect283k1", is_pqc: false}
+10: {name: "sect283r1", is_pqc: false}
+11: {name: "sect409k1", is_pqc: false}
+12: {name: "sect409r1", is_pqc: false}
+13: {name: "sect571k1", is_pqc: false}
+14: {name: "sect571r1", is_pqc: false}
+15: {name: "secp160k1", is_pqc: false}
+16: {name: "secp160r1", is_pqc: false}
+17: {name: "secp160r2", is_pqc: false}
+18: {name: "secp192k1", is_pqc: false}
+19: {name: "secp192r1", is_pqc: false}
+20: {name: "secp224k1", is_pqc: false}
+21: {name: "secp224r1", is_pqc: false}
+22: {name: "secp256k1", is_pqc: false}
+23: {name: "secp256r1", is_pqc: false}
+24: {name: "secp384r1", is_pqc: false}
+25: {name: "secp521r1", is_pqc: false}
+26: {name: "brainpoolP256r1", is_pqc: false}
+27: {name: "brainpoolP384r1", is_pqc: false}
+28: {name: "brainpoolP512r1", is_pqc: false}
+29: {name: "x25519", is_pqc: false}
+30: {name: "x448", is_pqc: false}
+31: {name: "brainpoolP256r1tls13", is_pqc: false}
+32: {name: "brainpoolP384r1tls13", is_pqc: false}
+33: {name: "brainpoolP512r1tls13", is_pqc: false}
+34: {name: "GC256A", is_pqc: false}
+35: {name: "GC256B", is_pqc: false}
+36: {name: "GC256C", is_pqc: false}
+37: {name: "GC256D", is_pqc: false}
+38: {name: "GC512A", is_pqc: false}
+39: {name: "GC512B", is_pqc: false}
+40: {name: "GC512C", is_pqc: false}
+41: {name: "curveSM2", is_pqc: false}
+
+# FFDH groups (RFC 7919)
+256: {name: "ffdhe2048", is_pqc: false}
+257: {name: "ffdhe3072", is_pqc: false}
+258: {name: "ffdhe4096", is_pqc: false}
+259: {name: "ffdhe6144", is_pqc: false}
+260: {name: "ffdhe8192", is_pqc: false}
+
+# ML-KEM groups (draft-connolly-tls-mlkem-key-agreement-03)
+512: {name: "MLKEM512", is_pqc: true}
+513: {name: "MLKEM768", is_pqc: true}
+514: {name: "MLKEM1024", is_pqc: true}
+
+# Hybrid ML-KEM groups (draft-kwiatkowski-tls-ecdhe-mlkem-02/03)
+4587: {name: "SecP256r1MLKEM768", is_pqc: true}
+4588: {name: "X25519MLKEM768", is_pqc: true}
+4589: {name: "SecP384r1MLKEM1024", is_pqc: true}
+
+# GREASE values (RFC 8701)
+2570: {name: "Reserved (GREASE)", is_pqc: false}
+6682: {name: "Reserved (GREASE)", is_pqc: false}
+10794: {name: "Reserved (GREASE)", is_pqc: false}
+14906: {name: "Reserved (GREASE)", is_pqc: false}
+19018: {name: "Reserved (GREASE)", is_pqc: false}
+23130: {name: "Reserved (GREASE)", is_pqc: false}
+27242: {name: "Reserved (GREASE)", is_pqc: false}
+31354: {name: "Reserved (GREASE)", is_pqc: false}
+35466: {name: "Reserved (GREASE)", is_pqc: false}
+39578: {name: "Reserved (GREASE)", is_pqc: false}
+43690: {name: "Reserved (GREASE)", is_pqc: false}
+47802: {name: "Reserved (GREASE)", is_pqc: false}
+51914: {name: "Reserved (GREASE)", is_pqc: false}
+56026: {name: "Reserved (GREASE)", is_pqc: false}
+60138: {name: "Reserved (GREASE)", is_pqc: false}
+64250: {name: "Reserved (GREASE)", is_pqc: false}
+
+# OBSOLETE PQC groups
+25497: {name: "X25519Kyber768Draft00 (OBSOLETE)", is_pqc: true}
+25498: {name: "SecP256r1Kyber768Draft00 (OBSOLETE)", is_pqc: true}
+
+# Special values
+0xFF01: {name: "arbitrary_explicit_prime_curves", is_pqc: false}
+0xFF02: {name: "arbitrary_explicit_char2_curves", is_pqc: false}
+
+# OQS-OpenSSL PQC groups (unofficial testing values)
+0x2F00: {name: "p256_frodo640aes", is_pqc: true}
+0x2F01: {name: "p256_frodo640shake", is_pqc: true}
+0x2F02: {name: "p384_frodo976aes", is_pqc: true}
+0x0203: {name: "frodo976shake", is_pqc: true}
+0x2F03: {name: "p384_frodo976shake", is_pqc: true}
+0x0204: {name: "frodo1344aes", is_pqc: true}
+0x2F04: {name: "p521_frodo1344aes", is_pqc: true}
+0x0205: {name: "frodo1344shake", is_pqc: true}
+0x2F05: {name: "p521_frodo1344shake", is_pqc: true}
+0x023A: {name: "kyber512", is_pqc: true}
+0x2F3A: {name: "p256_kyber512", is_pqc: true}
+0x023C: {name: "kyber768", is_pqc: true}
+0x2F3C: {name: "p384_kyber768", is_pqc: true}
+0x023D: {name: "kyber1024", is_pqc: true}
+0x2F3D: {name: "p521_kyber1024", is_pqc: true}
+0x0214: {name: "ntru_hps2048509", is_pqc: true}
+0x2F14: {name: "p256_ntru_hps2048509", is_pqc: true}
+0x0215: {name: "ntru_hps2048677", is_pqc: true}
+0x2F15: {name: "p384_ntru_hps2048677", is_pqc: true}
+0x0216: {name: "ntru_hps4096821", is_pqc: true}
+0x2F16: {name: "p521_ntru_hps4096821", is_pqc: true}
+0x0245: {name: "ntru_hps40961229", is_pqc: true}
+0x2F45: {name: "p521_ntru_hps40961229", is_pqc: true}
+0x0217: {name: "ntru_hrss701", is_pqc: true}
+0x2F17: {name: "p384_ntru_hrss701", is_pqc: true}
+0x0246: {name: "ntru_hrss1373", is_pqc: true}
+0x2F46: {name: "p521_ntru_hrss1373", is_pqc: true}
+0x0218: {name: "lightsaber", is_pqc: true}
+0x2F18: {name: "p256_lightsaber", is_pqc: true}
+0x0219: {name: "saber", is_pqc: true}
+0x2F19: {name: "p384_saber", is_pqc: true}
+0x021A: {name: "firesaber", is_pqc: true}
+0x2F1A: {name: "p521_firesaber", is_pqc: true}
+0x021B: {name: "sidhp434", is_pqc: true}
+0x2F1B: {name: "p256_sidhp434", is_pqc: true}
+0x021C: {name: "sidhp503", is_pqc: true}
+0x2F1C: {name: "p256_sidhp503", is_pqc: true}
+0x021D: {name: "sidhp610", is_pqc: true}
+0x2F1D: {name: "p384_sidhp610", is_pqc: true}
+0x021E: {name: "sidhp751", is_pqc: true}
+0x2F1E: {name: "p521_sidhp751", is_pqc: true}
+0x021F: {name: "sikep434", is_pqc: true}
+0x2F1F: {name: "p256_sikep434", is_pqc: true}
+0x0220: {name: "sikep503", is_pqc: true}
+0x2F20: {name: "p256_sikep503", is_pqc: true}
+0x0221: {name: "sikep610", is_pqc: true}
+0x2F21: {name: "p384_sikep610", is_pqc: true}
+0x0222: {name: "sikep751", is_pqc: true}
+0x2F22: {name: "p521_sikep751", is_pqc: true}
+0x0238: {name: "bikel1", is_pqc: true}
+0x2F38: {name: "p256_bikel1", is_pqc: true}
+0x023B: {name: "bikel3", is_pqc: true}
+0x2F3B: {name: "p384_bikel3", is_pqc: true}
+0x023E: {name: "kyber90s512", is_pqc: true}
+0x2F3E: {name: "p256_kyber90s512", is_pqc: true}
+0x023F: {name: "kyber90s768", is_pqc: true}
+0x2F3F: {name: "p384_kyber90s768", is_pqc: true}
+0x0240: {name: "kyber90s1024", is_pqc: true}
+0x2F40: {name: "p521_kyber90s1024", is_pqc: true}
+0x022C: {name: "hqc128", is_pqc: true}
+0x2F2C: {name: "p256_hqc128", is_pqc: true}
+0x022D: {name: "hqc192", is_pqc: true}
+0x2F2D: {name: "p384_hqc192", is_pqc: true}
+0x022E: {name: "hqc256", is_pqc: true}
+0x2F2E: {name: "p521_hqc256", is_pqc: true}
+0x022F: {name: "ntrulpr653", is_pqc: true}
+0x2F2F: {name: "p256_ntrulpr653", is_pqc: true}
+0x0230: {name: "ntrulpr761", is_pqc: true}
+0x2F43: {name: "p256_ntrulpr761", is_pqc: true}
+0x0231: {name: "ntrulpr857", is_pqc: true}
+0x2F31: {name: "p384_ntrulpr857", is_pqc: true}
+0x0241: {name: "ntrulpr1277", is_pqc: true}
+0x2F41: {name: "p521_ntrulpr1277", is_pqc: true}
+0x0232: {name: "sntrup653", is_pqc: true}
+0x2F32: {name: "p256_sntrup653", is_pqc: true}
+0x0233: {name: "sntrup761", is_pqc: true}
+0x2F44: {name: "p256_sntrup761", is_pqc: true}
+0x0234: {name: "sntrup857", is_pqc: true}
+0x2F34: {name: "p384_sntrup857", is_pqc: true}
+0x0242: {name: "sntrup1277", is_pqc: true}
+0x2F42: {name: "p521_sntrup1277", is_pqc: true}
+
+# Other PQ key exchange algorithms (Reserved for Private Use)
+0xFE30: {name: "X25519Kyber512Draft00 (OBSOLETE)", is_pqc: true}
+0xFE31: {name: "X25519Kyber768Draft00 (OBSOLETE)", is_pqc: true}

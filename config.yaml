@@ -1,0 +1,16 @@
+# Output configuration
+output:
+  base_dir: "result"  # Base directory to store results
+
+# Parallel execution configuration
+parallel:
+  workers: 0  # 0 means auto: use number of CPU cores
+
+# Logging configuration
+logging:
+  level: "DEBUG"       # DEBUG, INFO, WARNING, ERROR
+  file: "detector.log" # Log file name inside the run directory
+
+# Summary tool configuration
+summary:
+  mappings_dir: "mappings"  # Directory containing mapping files
