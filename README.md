@@ -123,7 +123,7 @@ python summary.py result/20251021_114720 --config my_config.yaml
 ```csv
 Frame,Src,Dst,Proto,KeyShareGroup,CipherSuite
 1,192.168.1.1,192.168.1.2,QUIC,0x11ec,0x1301
-2,192.168.1.2,192.168.1.1,TLSv1.3,29,0x1302
+2,192.168.1.2,192.168.1.1,0x0304,29,0x1302
 ```
 
 ### Summary Output (summary.py)
@@ -175,6 +175,6 @@ PQC-Detector/
 │   └── protocol_versions.yaml
 └── result/                 # Output directory (created automatically)
     └── YYYYMMDD_HHMMSS/   # Timestamped result directories
-        ├── *.csv          # CSV output files
+        ├── *_serverhello.csv  # CSV output files
         └── detector.log   # Log files
 ```

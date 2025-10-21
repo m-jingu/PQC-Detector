@@ -50,8 +50,8 @@ def load_mappings(mappings_dir: Path) -> Tuple[Dict, Dict, Dict]:
 
 
 def read_csv_files(directory: Path) -> Generator[Dict, None, None]:
-    """Read all *_server.csv files from directory and yield rows as dictionaries."""
-    for csv_file in directory.rglob("*_server.csv"):
+    """Read all *_serverhello.csv files from directory and yield rows as dictionaries."""
+    for csv_file in directory.rglob("*_serverhello.csv"):
         try:
             with csv_file.open("r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
@@ -255,7 +255,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "directory", 
         type=str, 
-        help="Directory containing *_server.csv files"
+        help="Directory containing *_serverhello.csv files"
     )
     parser.add_argument(
         "--config", 
