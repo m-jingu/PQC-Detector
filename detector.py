@@ -159,7 +159,7 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["Frame", "Src", "Dst", "Proto", "KeyShareGroup", "CipherSuite"])
+        writer.writerow(["Frame", "Src", "Dst", "SrcPort", "Proto", "KeyShareGroup", "CipherSuite"])
 
         for pkt in capture:
             try:
@@ -170,6 +170,9 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
                 dst = getattr(getattr(pkt, "ip", None), "dst", None) or getattr(getattr(pkt, "ipv6", None), "dst", None)
                 if not src or not dst:
                     continue
+
+                # Extract source port (TCP -> UDP fallback)
+                src_port = getattr(getattr(pkt, "tcp", None), "srcport", None) or getattr(getattr(pkt, "udp", None), "srcport", None)
 
                 # Protocol detection and field extraction
                 if hasattr(pkt, "quic"):
@@ -203,6 +206,7 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
                     frame_no,
                     str(src),
                     str(dst),
+                    str(src_port or ""),
                     str(proto_value or ""),
                     str(key_share or ""),
                     str(cipher or ""),

@@ -150,6 +150,10 @@ def calculate_statistics(rows: Generator[Dict, None, None],
         'group_counts': Counter(),
         'cipher_counts': Counter(),
         'protocol_counts': Counter(),
+        'srcport_counts': Counter(),
+        'pqc_srcport_counts': Counter(),
+        'pqc_cipher_counts': Counter(),
+        'pqc_protocol_counts': Counter(),
         'pqc_groups': set(),
         'group_names': {},
         'cipher_names': {}
@@ -163,8 +167,14 @@ def calculate_statistics(rows: Generator[Dict, None, None],
         if proto:
             stats['protocol_counts'][proto] += 1
         
+        # SrcPort distribution
+        srcport = row.get('SrcPort', '').strip()
+        if srcport:
+            stats['srcport_counts'][srcport] += 1
+        
         # KeyShareGroup analysis
         group_id = row.get('KeyShareGroup', '').strip()
+        is_pqc_packet = False
         if group_id:
             normalized_id = normalize_group_id(group_id)
             if normalized_id is not None:
@@ -178,6 +188,7 @@ def calculate_statistics(rows: Generator[Dict, None, None],
                 if is_pqc:
                     stats['pqc_packets'] += 1
                     stats['pqc_groups'].add(group_name)
+                    is_pqc_packet = True
         
         # CipherSuite analysis
         cipher_id = row.get('CipherSuite', '').strip()
@@ -189,6 +200,20 @@ def calculate_statistics(rows: Generator[Dict, None, None],
                 
                 stats['cipher_counts'][cipher_name] += 1
                 stats['cipher_names'][cipher_name] = cipher_id
+                
+                # PQC packet CipherSuite analysis
+                if is_pqc_packet:
+                    stats['pqc_cipher_counts'][cipher_name] += 1
+        
+        # PQC packet specific analysis
+        if is_pqc_packet:
+            # PQC packet SrcPort analysis
+            if srcport:
+                stats['pqc_srcport_counts'][srcport] += 1
+            
+            # PQC packet Protocol analysis
+            if proto:
+                stats['pqc_protocol_counts'][proto] += 1
     
     return stats
 
@@ -209,25 +234,56 @@ def format_output(stats: Dict, protocol_versions: Dict) -> str:
     output.append(f"PQC utilization rate: {pqc_rate:.2f}%")
     output.append("")
     
-    # PQC NamedGroups list
-    if stats['pqc_groups']:
-        output.append("PQC NamedGroups list:")
-        for group in sorted(stats['pqc_groups']):
-            output.append(f"  - {group}")
-        output.append("")
     
-    # PQC NamedGroups usage frequency (Top 10)
-    pqc_group_counts = {name: count for name, count in stats['group_counts'].items() 
-                       if name in stats['pqc_groups']}
-    if pqc_group_counts:
-        output.append("PQC NamedGroups usage frequency (Top 10):")
-        for i, (group, count) in enumerate(sorted(pqc_group_counts.items(), 
-                                                key=lambda x: x[1], reverse=True)[:10], 1):
-            percentage = (count / total * 100) if total > 0 else 0
-            output.append(f"  {i}. {group}: {count:,} ({percentage:.2f}%)")
+    # PQC packet specific analysis
+    if pqc > 0:
+        output.append("=== PQC Packet Analysis ===")
         output.append("")
+        
+        # PQC NamedGroups usage frequency (Top 10)
+        pqc_group_counts = {name: count for name, count in stats['group_counts'].items() 
+                           if name in stats['pqc_groups']}
+        if pqc_group_counts:
+            output.append("PQC NamedGroups usage frequency (Top 10):")
+            for i, (group, count) in enumerate(sorted(pqc_group_counts.items(), 
+                                                    key=lambda x: x[1], reverse=True)[:10], 1):
+                percentage = (count / total * 100) if total > 0 else 0
+                output.append(f"  {i}. {group}: {count:,} ({percentage:.2f}%)")
+            output.append("")
+        
+        # PQC packet CipherSuite distribution (Top 10)
+        if stats['pqc_cipher_counts']:
+            output.append("PQC packet CipherSuite distribution (Top 10):")
+            for i, (cipher, count) in enumerate(sorted(stats['pqc_cipher_counts'].items(), 
+                                                     key=lambda x: x[1], reverse=True)[:10], 1):
+                percentage = (count / pqc * 100) if pqc > 0 else 0
+                output.append(f"  {i:2d}. {cipher}: {count:,} ({percentage:.2f}%)")
+            output.append("")
+        
+        # PQC packet Protocol distribution
+        if stats['pqc_protocol_counts']:
+            output.append("PQC packet Protocol distribution:")
+            for proto, count in sorted(stats['pqc_protocol_counts'].items(), 
+                                     key=lambda x: x[1], reverse=True):
+                percentage = (count / pqc * 100) if pqc > 0 else 0
+                readable_proto = normalize_protocol_name(proto, protocol_versions)
+                output.append(f"  - {readable_proto}: {count:,} ({percentage:.2f}%)")
+            output.append("")
+        
+        # PQC packet SrcPort distribution (Top 10)
+        if stats['pqc_srcport_counts']:
+            output.append("PQC packet SrcPort distribution (Top 10):")
+            for i, (port, count) in enumerate(sorted(stats['pqc_srcport_counts'].items(), 
+                                                   key=lambda x: x[1], reverse=True)[:10], 1):
+                percentage = (count / pqc * 100) if pqc > 0 else 0
+                output.append(f"  {i:2d}. Port {port}: {count:,} ({percentage:.2f}%)")
+            output.append("")
     
-    # CipherSuite usage frequency (Top 10)
+    # All packet analysis
+    output.append("=== All Packet Analysis ===")
+    output.append("")
+    
+    # CipherSuite usage frequency (Top 10) - All packets
     if stats['cipher_counts']:
         output.append("CipherSuite usage frequency (Top 10):")
         for i, (cipher, count) in enumerate(stats['cipher_counts'].most_common(10), 1):
@@ -235,7 +291,7 @@ def format_output(stats: Dict, protocol_versions: Dict) -> str:
             output.append(f"  {i}. {cipher}: {count:,} ({percentage:.2f}%)")
         output.append("")
     
-    # Protocol distribution
+    # Protocol distribution - All packets
     if stats['protocol_counts']:
         output.append("Protocol distribution:")
         for proto, count in sorted(stats['protocol_counts'].items(), 
@@ -243,6 +299,16 @@ def format_output(stats: Dict, protocol_versions: Dict) -> str:
             percentage = (count / total * 100) if total > 0 else 0
             readable_proto = normalize_protocol_name(proto, protocol_versions)
             output.append(f"  - {readable_proto}: {count:,} ({percentage:.2f}%)")
+        output.append("")
+    
+    # SrcPort distribution (Top 10) - All packets
+    if stats['srcport_counts']:
+        output.append("SrcPort distribution (Top 10):")
+        for i, (port, count) in enumerate(sorted(stats['srcport_counts'].items(), 
+                                               key=lambda x: x[1], reverse=True)[:10], 1):
+            percentage = (count / total * 100) if total > 0 else 0
+            output.append(f"  {i:2d}. Port {port}: {count:,} ({percentage:.2f}%)")
+        output.append("")
     
     return "\n".join(output)
 
