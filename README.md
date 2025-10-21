@@ -5,6 +5,7 @@ A Python tool for analyzing pcap files to detect Post-Quantum Cryptography (PQC)
 ## Features
 
 - **Pcap Analysis**: Extract TLS ServerHello packets from large pcap files (GB scale, millions of packets)
+- **Memory Optimization**: Efficient processing with BPF filters and memory monitoring
 - **Compression Support**: Automatic decompression of zst-compressed pcap files
 - **PQC Detection**: Identify PQC NamedGroups and analyze utilization rates
 - **High Performance**: Parallel processing with configurable worker count
@@ -25,6 +26,7 @@ python detector.py <pcap_file_or_directory> [--workers N] [--config config.yaml]
 - CSV files with ServerHello packet information
 - Fields: Frame, Src, Dst, SrcPort, Proto, KeyShareGroup, CipherSuite
 - Processing speed metrics (packets/second)
+- Memory usage monitoring (pyshark and tshark processes)
 - Automatic cleanup of temporary decompressed files
 
 ### 2. summary.py
@@ -75,6 +77,18 @@ sudo apt-get install zstd
 sudo yum install zstd
 ```
 
+5. **Install tshark (Wireshark command-line tools):**
+```bash
+# macOS
+brew install wireshark
+
+# Ubuntu/Debian
+sudo apt-get install tshark
+
+# CentOS/RHEL
+sudo yum install wireshark
+```
+
 ## Configuration
 
 ### config.yaml
@@ -122,6 +136,18 @@ python detector.py /path/to/compressed/files/*.pcap.zst
 
 # Generate statistics from CSV output
 python summary.py result/20251021_114720
+```
+
+### Memory-Optimized Analysis
+```bash
+# Monitor memory usage during processing
+python detector.py large_file.pcap
+
+# Check memory usage in logs
+tail -f result/YYYYMMDD_HHMMSS/detector.log | grep "memory usage"
+
+# Process with reduced worker count for memory-constrained systems
+python detector.py /path/to/pcap/files/ --workers 4
 ```
 
 ### Advanced Configuration
@@ -192,6 +218,7 @@ SrcPort distribution (Top 10):
 - Python 3.7+
 - pyshark
 - PyYAML
+- psutil (for memory monitoring)
 - tshark (Wireshark command-line tools)
 - zstd (for compressed file support)
 
@@ -212,5 +239,5 @@ PQC-Detector/
 └── result/                 # Output directory (created automatically)
     └── YYYYMMDD_HHMMSS/   # Timestamped result directories
         ├── *_serverhello.csv  # CSV output files
-        └── detector.log   # Log files
+        └── detector.log   # Log files with memory usage monitoring
 ```

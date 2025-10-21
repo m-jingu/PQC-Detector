@@ -9,7 +9,8 @@ Features:
 - Supports both TLS and QUIC protocols
 - Parallel processing for multiple pcap files
 - CSV output for easy aggregation
-- Configurable via YAML config file
+- Memory-optimized processing for large files
+- Automatic decompression of zst-compressed files
 - Performance metrics and logging
 """
 
@@ -19,6 +20,7 @@ import csv
 import datetime as dt
 import logging
 import os
+import psutil
 import subprocess
 import sys
 import tempfile
@@ -182,6 +184,22 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
     iterated = 0
     t0 = time.time()
     
+    # Monitor memory usage
+    process = psutil.Process()
+    initial_memory = process.memory_info().rss / 1024 / 1024
+    logger.info("Initial memory usage: %.1f MB", initial_memory)
+    
+    def get_tshark_memory():
+        """Get total memory usage of all tshark processes"""
+        total_tshark_memory = 0
+        for proc in psutil.process_iter():
+            try:
+                if 'tshark' in proc.name().lower():
+                    total_tshark_memory += proc.memory_info().rss / 1024 / 1024
+            except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                continue
+        return total_tshark_memory
+    
     # Handle compressed files
     actual_pcap_path = pcap_path
     temp_file = None
@@ -196,10 +214,19 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
         logger.info("Using decompressed file: %s", actual_pcap_path)
 
     try:
+        # Memory-optimized capture settings for large files
         capture = pyshark.FileCapture(
             str(actual_pcap_path),
             keep_packets=False,
-            display_filter="tls.handshake.type == 2",
+            display_filter="(tcp or udp.port==443) and tls.handshake.type == 2",
+            include_raw=False,
+            override_prefs={
+                'ip.defragment': False,
+                'tcp.analyze_sequence_numbers': False,
+                'tcp.track_bytes_in_flight': False,
+                'tcp.relative_sequence_numbers': False,
+                'tcp.calculate_timestamps': False,
+            }
         )
     except Exception as e:
         logger.error("Failed to open pcap %s: %s", actual_pcap_path, e)
@@ -215,6 +242,14 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
         for pkt in capture:
             try:
                 iterated += 1
+                
+                # Monitor memory usage every 1000 packets
+                if iterated % 1000 == 0:
+                    current_memory = process.memory_info().rss / 1024 / 1024
+                    memory_delta = current_memory - initial_memory
+                    tshark_memory = get_tshark_memory()
+                    logger.debug("Processed %d packets, pyshark: %.1f MB (delta: %.1f MB), tshark: %.1f MB", 
+                                iterated, current_memory, memory_delta, tshark_memory)
 
                 # Extract source and destination addresses (IPv4 -> IPv6 fallback)
                 src = getattr(getattr(pkt, "ip", None), "src", None) or getattr(getattr(pkt, "ipv6", None), "src", None)
@@ -282,6 +317,13 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
         except Exception as e:
             logger.warning("Failed to clean up temporary file %s: %s", temp_file, e)
 
+    # Final memory usage report
+    final_memory = process.memory_info().rss / 1024 / 1024
+    memory_delta = final_memory - initial_memory
+    final_tshark_memory = get_tshark_memory()
+    logger.info("Final memory usage - pyshark: %.1f MB (delta: %.1f MB), tshark: %.1f MB", 
+                final_memory, memory_delta, final_tshark_memory)
+    
     duration = max(0.000001, time.time() - t0)
     return pcap_path, extracted, errors, iterated, duration
 
