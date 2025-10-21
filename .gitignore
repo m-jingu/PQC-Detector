@@ -136,6 +136,8 @@ result/
 # Pcap files (usually large)
 *.pcap
 *.pcapng
+*.pcap.zst
+*.pcapng.zst
 *.cap
 
 # Temporary files

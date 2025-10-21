@@ -19,7 +19,9 @@ import csv
 import datetime as dt
 import logging
 import os
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -37,6 +39,40 @@ def ensure_run_directory(base_dir: Path) -> Path:
     run_dir = base_dir / timestamp
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
+
+
+def decompress_zst_file(zst_path: Path, logger: logging.Logger) -> Optional[Path]:
+    """Decompress a .zst file and return the path to the temporary decompressed file."""
+    try:
+        # Check if zstd is available
+        subprocess.run(["zstd", "--version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        logger.error("zstd command not found. Please install zstd to handle .zst files.")
+        return None
+    
+    try:
+        # Create temporary file for decompressed data
+        temp_fd, temp_path = tempfile.mkstemp(suffix=".pcap", prefix="decompressed_")
+        os.close(temp_fd)  # Close the file descriptor, we'll use the path
+        
+        # Decompress the file
+        logger.info("Decompressing %s...", zst_path)
+        result = subprocess.run(
+            ["zstd", "-d", "-f", str(zst_path), "-o", temp_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        logger.info("Successfully decompressed %s to %s", zst_path, temp_path)
+        return Path(temp_path)
+        
+    except subprocess.CalledProcessError as e:
+        logger.error("Failed to decompress %s: %s", zst_path, e.stderr)
+        return None
+    except Exception as e:
+        logger.error("Unexpected error decompressing %s: %s", zst_path, e)
+        return None
 
 
 def setup_logging(log_dir: Path, level: str, log_file_name: str) -> logging.Logger:
@@ -75,7 +111,7 @@ def discover_pcap_files(input_path: Path) -> List[Path]:
     if input_path.is_file():
         return [input_path]
     pcaps: List[Path] = []
-    for ext in ("*.pcap", "*.pcapng"):
+    for ext in ("*.pcap", "*.pcapng", "*.pcap.zst", "*.pcapng.zst"):
         pcaps.extend(input_path.rglob(ext))
     return sorted(pcaps)
 
@@ -145,15 +181,30 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
     errors = 0
     iterated = 0
     t0 = time.time()
+    
+    # Handle compressed files
+    actual_pcap_path = pcap_path
+    temp_file = None
+    
+    if pcap_path.suffix.lower() == '.zst':
+        logger.info("Detected .zst compressed file: %s", pcap_path)
+        temp_file = decompress_zst_file(pcap_path, logger)
+        if temp_file is None:
+            logger.error("Failed to decompress %s", pcap_path)
+            return pcap_path, 0, 1, 0, 0.0
+        actual_pcap_path = temp_file
+        logger.info("Using decompressed file: %s", actual_pcap_path)
 
     try:
         capture = pyshark.FileCapture(
-            str(pcap_path),
+            str(actual_pcap_path),
             keep_packets=False,
             display_filter="tls.handshake.type == 2",
         )
     except Exception as e:
-        logger.error("Failed to open pcap %s: %s", pcap_path, e)
+        logger.error("Failed to open pcap %s: %s", actual_pcap_path, e)
+        if temp_file:
+            temp_file.unlink(missing_ok=True)  # Clean up temp file
         return pcap_path, 0, 1, 0, 0.0
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -222,6 +273,14 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
         capture.close()
     except Exception:
         pass
+    
+    # Clean up temporary file if it was created
+    if temp_file:
+        try:
+            temp_file.unlink(missing_ok=True)
+            logger.debug("Cleaned up temporary file: %s", temp_file)
+        except Exception as e:
+            logger.warning("Failed to clean up temporary file %s: %s", temp_file, e)
 
     duration = max(0.000001, time.time() - t0)
     return pcap_path, extracted, errors, iterated, duration
