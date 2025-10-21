@@ -2,6 +2,10 @@
 output:
   base_dir: "result"  # Base directory to store results
 
+# Temporary file configuration
+temp:
+  decompress_dir: null  # Directory for zst decompression (null = system temp)
+
 # Parallel execution configuration
 parallel:
   workers: 0  # 0 means auto: use number of CPU cores

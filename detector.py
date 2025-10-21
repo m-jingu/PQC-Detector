@@ -43,7 +43,7 @@ def ensure_run_directory(base_dir: Path) -> Path:
     return run_dir
 
 
-def decompress_zst_file(zst_path: Path, logger: logging.Logger) -> Optional[Path]:
+def decompress_zst_file(zst_path: Path, logger: logging.Logger, temp_dir: Optional[Path] = None) -> Optional[Path]:
     """Decompress a .zst file and return the path to the temporary decompressed file."""
     try:
         # Check if zstd is available
@@ -54,7 +54,11 @@ def decompress_zst_file(zst_path: Path, logger: logging.Logger) -> Optional[Path
     
     try:
         # Create temporary file for decompressed data
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".pcap", prefix="decompressed_")
+        if temp_dir:
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".pcap", prefix="decompressed_", dir=temp_dir)
+        else:
+            temp_fd, temp_path = tempfile.mkstemp(suffix=".pcap", prefix="decompressed_")
         os.close(temp_fd)  # Close the file descriptor, we'll use the path
         
         # Decompress the file
@@ -130,6 +134,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("pcap_input", type=str, help="pcap file or directory")
     parser.add_argument("--workers", type=int, default=None, help="number of parallel workers")
     parser.add_argument("--config", type=str, default="config.yaml", help="config file path")
+    parser.add_argument("--temp-dir", type=str, default=None, help="directory for zst decompression")
     return parser.parse_args(argv)
 
 
@@ -145,7 +150,7 @@ def get_workers(config: dict, cli_workers: Optional[int]) -> int:
         return 1
 
 
-def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int, int, float]:
+def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path] = None) -> Tuple[Path, int, int, int, float]:
     """
     Process a single pcap file and extract ServerHello information.
     
@@ -206,7 +211,7 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
     
     if pcap_path.suffix.lower() == '.zst':
         logger.info("Detected .zst compressed file: %s", pcap_path)
-        temp_file = decompress_zst_file(pcap_path, logger)
+        temp_file = decompress_zst_file(pcap_path, logger, temp_dir)
         if temp_file is None:
             logger.error("Failed to decompress %s", pcap_path)
             return pcap_path, 0, 1, 0, 0.0
@@ -328,7 +333,7 @@ def process_single_pcap(pcap_path: Path, out_csv: Path) -> Tuple[Path, int, int,
     return pcap_path, extracted, errors, iterated, duration
 
 
-def run_parallel(pcaps: List[Path], run_dir: Path, workers: int) -> None:
+def run_parallel(pcaps: List[Path], run_dir: Path, workers: int, temp_dir: Optional[Path] = None) -> None:
     """Process multiple pcap files in parallel and collect performance metrics."""
     logger = logging.getLogger("pqc_detector")
     
@@ -340,7 +345,7 @@ def run_parallel(pcaps: List[Path], run_dir: Path, workers: int) -> None:
     logger.info("Processing %d pcap(s) with %d worker(s)", total, workers)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(process_single_pcap, p, output_csv_path(run_dir, p)) for p in pcaps]
+        futures = [executor.submit(process_single_pcap, p, output_csv_path(run_dir, p), temp_dir) for p in pcaps]
 
         total_extracted = total_errors = total_iterated = 0
         total_duration = 0.0
@@ -395,12 +400,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     input_path = Path(args.pcap_input).resolve()
     pcaps = discover_pcap_files(input_path)
     workers = get_workers(config, args.workers)
+    
+    # Get temp directory from command line or config
+    if args.temp_dir:
+        temp_dir = Path(args.temp_dir).resolve()
+    else:
+        temp_dir_config = config.get("temp", {}).get("decompress_dir")
+        temp_dir = Path(temp_dir_config).resolve() if temp_dir_config else None
 
     logger.info("Run directory: %s", run_dir)
     logger.info("Found %d input pcap(s)", len(pcaps))
+    if temp_dir:
+        logger.info("Using temp directory: %s", temp_dir)
 
     # Process files in parallel
-    run_parallel(pcaps, run_dir, workers)
+    run_parallel(pcaps, run_dir, workers, temp_dir)
 
     logger.info("All done.")
     return 0
