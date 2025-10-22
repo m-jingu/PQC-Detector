@@ -5,7 +5,7 @@ A Python tool for analyzing pcap files to detect Post-Quantum Cryptography (PQC)
 ## Features
 
 - **Pcap Analysis**: Extract TLS ServerHello packets from large pcap files (GB scale, millions of packets)
-- **Memory Optimization**: Efficient processing with BPF filters and memory monitoring
+- **Memory Optimization**: Efficient processing with display filters and memory monitoring
 - **Compression Support**: Automatic decompression of zst-compressed pcap files
 - **PQC Detection**: Identify PQC NamedGroups and analyze utilization rates
 - **High Performance**: Parallel processing with configurable worker count
@@ -19,7 +19,7 @@ Extracts TLS ServerHello packets from pcap files and outputs CSV data.
 
 **Usage:**
 ```bash
-python detector.py <pcap_file_or_directory> [--workers N] [--config config.yaml]
+python detector.py <pcap_file_or_directory> [--workers N] [--config config.yaml] [--temp-dir DIR]
 ```
 
 **Output:**
@@ -99,6 +99,10 @@ Main configuration file for both tools:
 output:
   base_dir: "result"  # Base directory to store results
 
+# Temporary file configuration
+temp:
+  decompress_dir: null  # Directory for zst decompression (null = system temp)
+
 # Parallel execution configuration
 parallel:
   workers: 0  # 0 means auto: use number of CPU cores
@@ -148,6 +152,9 @@ tail -f result/YYYYMMDD_HHMMSS/detector.log | grep "memory usage"
 
 # Process with reduced worker count for memory-constrained systems
 python detector.py /path/to/pcap/files/ --workers 4
+
+# Use custom temp directory for zst decompression
+python detector.py /path/to/pcap/files/ --temp-dir /fast/ssd/temp
 ```
 
 ### Advanced Configuration

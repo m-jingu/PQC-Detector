@@ -8,9 +8,11 @@ KeyShareGroup and CipherSuite for PQC (Post-Quantum Cryptography) analysis.
 Features:
 - Supports both TLS and QUIC protocols
 - Parallel processing for multiple pcap files
-- CSV output for easy aggregation
-- Memory-optimized processing for large files
+- Memory-optimized processing with display filters
 - Automatic decompression of zst-compressed files
+- Configurable temporary directory for decompression
+- Memory usage monitoring (pyshark and tshark processes)
+- CSV output for easy aggregation
 - Performance metrics and logging
 """
 
@@ -124,7 +126,8 @@ def discover_pcap_files(input_path: Path) -> List[Path]:
 
 def output_csv_path(run_dir: Path, pcap_path: Path) -> Path:
     base = pcap_path.name
-    if "." in base:
+    # Remove all extensions (handle .pcap.zst, .pcapng.zst, etc.)
+    while "." in base:
         base = base[: base.rfind(".")]
     return run_dir / f"{base}_serverhello.csv"
 
