@@ -124,17 +124,20 @@ def discover_pcap_files(input_path: Path) -> List[Path]:
     return sorted(pcaps)
 
 
-def output_csv_path(run_dir: Path, pcap_path: Path) -> Path:
+def output_csv_path(run_dir: Path, pcap_path: Path, mode: str = "server") -> Path:
     base = pcap_path.name
     # Remove all extensions (handle .pcap.zst, .pcapng.zst, etc.)
     while "." in base:
         base = base[: base.rfind(".")]
-    return run_dir / f"{base}_serverhello.csv"
+    suffix = "clienthello" if mode == "client" else "serverhello"
+    return run_dir / f"{base}_{suffix}.csv"
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract TLS/QUIC ServerHello info to CSV")
+    parser = argparse.ArgumentParser(description="Extract TLS/QUIC ServerHello/ClientHello info to CSV")
     parser.add_argument("pcap_input", type=str, help="pcap file or directory")
+    parser.add_argument("--mode", type=str, choices=["server", "client"], default="server", 
+                       help="analysis mode: server (ServerHello) or client (ClientHello)")
     parser.add_argument("--workers", type=int, default=None, help="number of parallel workers")
     parser.add_argument("--config", type=str, default="config.yaml", help="config file path")
     parser.add_argument("--temp-dir", type=str, default=None, help="directory for zst decompression")
@@ -153,9 +156,15 @@ def get_workers(config: dict, cli_workers: Optional[int]) -> int:
         return 1
 
 
-def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path] = None) -> Tuple[Path, int, int, int, float]:
+def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path] = None, mode: str = "server") -> Tuple[Path, int, int, int, float]:
     """
-    Process a single pcap file and extract ServerHello information.
+    Process a single pcap file and extract ServerHello or ClientHello information.
+    
+    Args:
+        pcap_path: Path to the pcap file
+        out_csv: Path to the output CSV file
+        temp_dir: Directory for temporary files (zst decompression)
+        mode: Analysis mode ("server" for ServerHello, "client" for ClientHello)
     
     Returns:
         Tuple of (pcap_path, extracted_count, error_count, iterated_count, duration)
@@ -223,10 +232,11 @@ def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path]
 
     try:
         # Memory-optimized capture settings for large files
+        handshake_type = "1" if mode == "client" else "2"
         capture = pyshark.FileCapture(
             str(actual_pcap_path),
             keep_packets=False,
-            display_filter="(tcp or udp.port==443) and tls.handshake.type == 2",
+            display_filter=f"(tcp or udp.port==443) and tls.handshake.type == {handshake_type}",
             include_raw=False,
             override_prefs={
                 'ip.defragment': False,
@@ -245,7 +255,10 @@ def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path]
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["Frame", "Src", "SrcPort", "Dst", "DstPort", "Proto", "KeyShareGroup", "CipherSuite"])
+        if mode == "client":
+            writer.writerow(["Frame", "Src", "SrcPort", "Dst", "DstPort", "Proto", "SupportedGroups", "ServerName"])
+        else:
+            writer.writerow(["Frame", "Src", "SrcPort", "Dst", "DstPort", "Proto", "KeyShareGroup", "CipherSuite"])
 
         for pkt in capture:
             try:
@@ -273,40 +286,80 @@ def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path]
                 if hasattr(pkt, "quic"):
                     # QUIC protocol
                     proto_value = "QUIC"
-                    key_share = getattr(pkt.quic, "tls_handshake_extensions_key_share_group", "")
-                    cipher = getattr(pkt.quic, "tls_handshake_ciphersuite", "")
+                    if mode == "client":
+                        # ClientHello fields for QUIC
+                        supported_groups = getattr(pkt.quic, "tls_handshake_extensions_supported_group", "")
+                        server_name = getattr(pkt.quic, "tls_handshake_extensions_server_name", "")
+                    else:
+                        # ServerHello fields for QUIC
+                        key_share = getattr(pkt.quic, "tls_handshake_extensions_key_share_group", "")
+                        cipher = getattr(pkt.quic, "tls_handshake_ciphersuite", "")
                 else:
                     # TLS protocol (requires tls layer)
                     tls = getattr(pkt, "tls", None)
                     if tls is None:
                         continue
                     
-                    # Determine TLS version
-                    proto_value = (
-                        getattr(tls, "handshake_extensions_supported_version", "")
-                        or getattr(tls, "handshake_version", "")
-                        or getattr(tls, "record_version", "")
-                        or "TLS"
-                    )
-                    
-                    # Extract TLS fields
-                    key_share = getattr(tls, "handshake_extensions_key_share_group", "")
-                    cipher = getattr(tls, "handshake_ciphersuite", "")
+                    if mode == "client":
+                        # ClientHello mode: use simple "TLS" protocol value
+                        proto_value = "TLS"
+                        # ClientHello fields for TLS
+                        supported_groups = getattr(tls, "handshake_extensions_supported_group", "")
+                        server_name = getattr(tls, "handshake_extensions_server_name", "")
+                    else:
+                        # ServerHello mode: determine TLS version
+                        proto_value = (
+                            getattr(tls, "handshake_extensions_supported_version", "")
+                            or getattr(tls, "handshake_version", "")
+                            or getattr(tls, "record_version", "")
+                            or "TLS"
+                        )
+                        # ServerHello fields for TLS
+                        key_share = getattr(tls, "handshake_extensions_key_share_group", "")
+                        cipher = getattr(tls, "handshake_ciphersuite", "")
 
                 frame_no = str(getattr(getattr(pkt, "frame_info", None), "number", ""))
                 if not frame_no:
                     continue
 
-                writer.writerow([
-                    frame_no,
-                    str(src),
-                    str(src_port or ""),
-                    str(dst),
-                    str(dst_port or ""),
-                    str(proto_value or ""),
-                    str(key_share or ""),
-                    str(cipher or ""),
-                ])
+                if mode == "client":
+                    # Handle multiple SupportedGroups
+                    supported_groups_str = ""
+                    if supported_groups:
+                        try:
+                            # Check if it's a field with multiple values
+                            if hasattr(supported_groups, 'fields') and supported_groups.fields:
+                                group_list = []
+                                for field in supported_groups.fields:
+                                    if hasattr(field, 'show'):
+                                        group_list.append(field.show)
+                                supported_groups_str = ",".join(group_list)
+                            else:
+                                supported_groups_str = str(supported_groups)
+                        except Exception:
+                            supported_groups_str = str(supported_groups)
+                    
+                    writer.writerow([
+                        frame_no,
+                        str(src),
+                        str(src_port or ""),
+                        str(dst),
+                        str(dst_port or ""),
+                        str(proto_value or ""),
+                        supported_groups_str,
+                        str(server_name or ""),
+                    ])
+                else:
+                    writer.writerow([
+                        frame_no,
+                        str(src),
+                        str(src_port or ""),
+                        str(dst),
+                        str(dst_port or ""),
+                        str(proto_value or ""),
+                        str(key_share or ""),
+                        str(cipher or ""),
+                    ])
                 extracted += 1
 
             except Exception as e:
@@ -338,7 +391,7 @@ def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path]
     return pcap_path, extracted, errors, iterated, duration
 
 
-def run_parallel(pcaps: List[Path], run_dir: Path, workers: int, temp_dir: Optional[Path] = None) -> None:
+def run_parallel(pcaps: List[Path], run_dir: Path, workers: int, temp_dir: Optional[Path] = None, mode: str = "server") -> None:
     """Process multiple pcap files in parallel and collect performance metrics."""
     logger = logging.getLogger("pqc_detector")
     
@@ -350,7 +403,7 @@ def run_parallel(pcaps: List[Path], run_dir: Path, workers: int, temp_dir: Optio
     logger.info("Processing %d pcap(s) with %d worker(s)", total, workers)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(process_single_pcap, p, output_csv_path(run_dir, p), temp_dir) for p in pcaps]
+        futures = [executor.submit(process_single_pcap, p, output_csv_path(run_dir, p, mode), temp_dir, mode) for p in pcaps]
 
         total_extracted = total_errors = total_iterated = 0
         total_duration = 0.0
@@ -415,11 +468,12 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logger.info("Run directory: %s", run_dir)
     logger.info("Found %d input pcap(s)", len(pcaps))
+    logger.info("Analysis mode: %s", args.mode)
     if temp_dir:
         logger.info("Using temp directory: %s", temp_dir)
 
     # Process files in parallel
-    run_parallel(pcaps, run_dir, workers, temp_dir)
+    run_parallel(pcaps, run_dir, workers, temp_dir, args.mode)
 
     logger.info("All done.")
     return 0
