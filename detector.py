@@ -245,7 +245,7 @@ def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path]
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     with out_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["Frame", "Src", "Dst", "SrcPort", "Proto", "KeyShareGroup", "CipherSuite"])
+        writer.writerow(["Frame", "Src", "SrcPort", "Dst", "DstPort", "Proto", "KeyShareGroup", "CipherSuite"])
 
         for pkt in capture:
             try:
@@ -265,8 +265,9 @@ def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path]
                 if not src or not dst:
                     continue
 
-                # Extract source port (TCP -> UDP fallback)
+                # Extract source and destination ports (TCP -> UDP fallback)
                 src_port = getattr(getattr(pkt, "tcp", None), "srcport", None) or getattr(getattr(pkt, "udp", None), "srcport", None)
+                dst_port = getattr(getattr(pkt, "tcp", None), "dstport", None) or getattr(getattr(pkt, "udp", None), "dstport", None)
 
                 # Protocol detection and field extraction
                 if hasattr(pkt, "quic"):
@@ -299,8 +300,9 @@ def process_single_pcap(pcap_path: Path, out_csv: Path, temp_dir: Optional[Path]
                 writer.writerow([
                     frame_no,
                     str(src),
-                    str(dst),
                     str(src_port or ""),
+                    str(dst),
+                    str(dst_port or ""),
                     str(proto_value or ""),
                     str(key_share or ""),
                     str(cipher or ""),
