@@ -136,7 +136,7 @@ def output_csv_path(run_dir: Path, pcap_path: Path, mode: str = "server") -> Pat
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract TLS/QUIC ServerHello/ClientHello info to CSV")
     parser.add_argument("pcap_input", type=str, help="pcap file or directory")
-    parser.add_argument("--mode", type=str, choices=["server", "client"], default="server", 
+    parser.add_argument("-m", "--mode", type=str, choices=["server", "client"], default="server", 
                        help="analysis mode: server (ServerHello) or client (ClientHello)")
     parser.add_argument("--workers", type=int, default=None, help="number of parallel workers")
     parser.add_argument("--config", type=str, default="config.yaml", help="config file path")

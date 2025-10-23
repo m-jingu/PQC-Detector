@@ -4,47 +4,52 @@ A Python tool for analyzing pcap files to detect Post-Quantum Cryptography (PQC)
 
 ## Features
 
-- **Pcap Analysis**: Extract TLS ServerHello packets from large pcap files (GB scale, millions of packets)
+- **Dual Protocol Analysis**: Extract both TLS ServerHello and ClientHello packets from large pcap files (GB scale, millions of packets)
 - **Memory Optimization**: Efficient processing with display filters and memory monitoring
 - **Compression Support**: Automatic decompression of zst-compressed pcap files
 - **PQC Detection**: Identify PQC NamedGroups and analyze utilization rates
+- **Packet Matching**: Match ServerHello and ClientHello packets to identify PQC servers
 - **High Performance**: Parallel processing with configurable worker count
 - **Comprehensive Statistics**: Detailed analysis of NamedGroups, CipherSuites, and protocol distribution
 - **Human-Readable Output**: Convert protocol versions and cipher suites to readable format
+- **PQC Server Analysis**: Optional identification of PQC-enabled servers with ServerName and port
 
 ## Tools
 
 ### 1. detector.py
-Extracts TLS ServerHello packets from pcap files and outputs CSV data.
+Extracts TLS ServerHello or ClientHello packets from pcap files and outputs CSV data.
 
 **Usage:**
 ```bash
-python detector.py <pcap_file_or_directory> [--workers N] [--config config.yaml] [--temp-dir DIR]
+python detector.py <pcap_file_or_directory> [-m|--mode server|client] [--workers N] [--config config.yaml] [--temp-dir DIR]
 ```
 
+**Modes:**
+- `-m server` or `--mode server` (default): Extract ServerHello packets
+- `-m client` or `--mode client`: Extract ClientHello packets
+
 **Output:**
-- CSV files with ServerHello packet information
-- Fields: Frame, Src, Dst, SrcPort, Proto, KeyShareGroup, CipherSuite
+- **ServerHello mode**: CSV files with `*_serverhello.csv` containing Frame, Src, SrcPort, Dst, DstPort, Proto, KeyShareGroup, CipherSuite
+- **ClientHello mode**: CSV files with `*_clienthello.csv` containing Frame, Src, SrcPort, Dst, DstPort, Proto, SupportedGroups, ServerName
 - Processing speed metrics (packets/second)
 - Memory usage monitoring (pyshark and tshark processes)
 - Automatic cleanup of temporary decompressed files
 
 ### 2. summary.py
-Analyzes CSV output from detector.py and generates statistical summaries.
+Analyzes CSV output from detector.py and generates statistical summaries with optional PQC server analysis.
 
 **Usage:**
 ```bash
-python summary.py <csv_directory> [--config config.yaml]
+python summary.py <csv_directories...> [--config config.yaml] [--pqc-servers|-p FILE]
 ```
 
+**Options:**
+- `--pqc-servers FILE` or `-p FILE`: Enable PQC server analysis and output to specified file
+
 **Output:**
-- Total ServerHello packets
-- PQC packets and utilization rate
-- PQC NamedGroups usage frequency (Top 10)
-- CipherSuite usage frequency (Top 10)
-- Protocol distribution (QUIC/TLS/SSL/DTLS versions)
-- SrcPort distribution (Top 10)
-- PQC packet specific analysis (SrcPort, CipherSuite, Protocol distributions)
+- **ServerHello Analysis**: Total packets, PQC utilization, NamedGroups, CipherSuites, Protocol distribution, SrcPort distribution
+- **ClientHello Analysis**: Total packets, PQC utilization, SupportedGroups, Protocol distribution, DstPort distribution
+- **PQC Server Analysis** (optional): List of PQC-enabled servers in "ServerName:Port" format
 
 ## Installation
 
@@ -129,8 +134,11 @@ The tool uses three YAML mapping files in the `mappings/` directory:
 
 ### Basic Analysis
 ```bash
-# Analyze a single pcap file
+# Analyze ServerHello packets (default)
 python detector.py capture.pcap
+
+# Analyze ClientHello packets
+python detector.py capture.pcap -m client
 
 # Analyze multiple pcap files in a directory
 python detector.py /path/to/pcap/files/
@@ -140,6 +148,9 @@ python detector.py /path/to/compressed/files/*.pcap.zst
 
 # Generate statistics from CSV output
 python summary.py result/20251021_114720
+
+# Generate statistics with PQC server analysis
+python summary.py result/20251021_114720 --pqc-servers pqc_servers.txt
 ```
 
 ### Memory-Optimized Analysis
@@ -172,52 +183,98 @@ python summary.py result/20251021_114720 --config my_config.yaml
 ## Output Format
 
 ### CSV Output (detector.py)
+
+**ServerHello mode:**
 ```csv
-Frame,Src,Dst,SrcPort,Proto,KeyShareGroup,CipherSuite
-1,192.168.1.1,192.168.1.2,443,QUIC,0x11ec,0x1301
-2,192.168.1.2,192.168.1.1,8443,0x0304,29,0x1302
+Frame,Src,SrcPort,Dst,DstPort,Proto,KeyShareGroup,CipherSuite
+1,192.168.1.1,12345,192.168.1.2,443,TLSv1.3,29,0x1301
+2,192.168.1.2,443,192.168.1.1,12345,QUIC,0x11ec,0x1302
+```
+
+**ClientHello mode:**
+```csv
+Frame,Src,SrcPort,Dst,DstPort,Proto,SupportedGroups,ServerName
+1,192.168.1.1,12345,192.168.1.2,443,TLS,29,30,example.com
+2,192.168.1.1,12346,192.168.1.2,443,QUIC,29,30,api.example.com
 ```
 
 ### Summary Output (summary.py)
 ```
-=== PQC Detection Summary ===
+=== ServerHello Analysis ===
 
-Total ServerHello packets: 1,000
-PQC packets: 150
+Total ServerHello packets: 500
+PQC packets: 75
 PQC utilization rate: 15.00%
 
-=== PQC Packet Analysis ===
+=== PQC ServerHello Packet Analysis ===
 
-PQC NamedGroups usage frequency (Top 10):
-  1. X25519MLKEM768: 100 (10.00%)
-  2. P256Kyber1024: 50 (5.00%)
+PQC ServerHello NamedGroups usage frequency (Top 10):
+  1. X25519MLKEM768: 50 (10.00%)
+  2. P256Kyber1024: 25 (5.00%)
 
-PQC packet CipherSuite distribution (Top 10):
-   1. TLS_AES_128_GCM_SHA256: 120 (80.00%)
-   2. TLS_AES_256_GCM_SHA384: 30 (20.00%)
+PQC ServerHello packet CipherSuite distribution (Top 10):
+   1. TLS_AES_256_GCM_SHA384: 60 (80.00%)
+   2. TLS_CHACHA20_POLY1305_SHA256: 15 (20.00%)
 
-PQC packet Protocol distribution:
-  - QUIC: 90 (60.00%)
-  - TLSv1.3: 60 (40.00%)
+PQC ServerHello packet Protocol distribution:
+  - TLSv1.3: 60 (80.00%)
+  - QUIC: 15 (20.00%)
 
-PQC packet SrcPort distribution (Top 10):
-   1. Port 443: 120 (80.00%)
-   2. Port 8443: 30 (20.00%)
+PQC ServerHello packet SrcPort distribution (Top 10):
+   1. Port 443: 60 (80.00%)
+   2. Port 8443: 15 (20.00%)
 
-=== All Packet Analysis ===
+=== All ServerHello Packet Analysis ===
 
-CipherSuite usage frequency (Top 10):
-  1. TLS_AES_128_GCM_SHA256: 800 (80.00%)
-  2. TLS_AES_256_GCM_SHA384: 200 (20.00%)
+ServerHello CipherSuite usage frequency (Top 10):
+  1. TLS_AES_256_GCM_SHA384: 400 (80.00%)
+  2. TLS_CHACHA20_POLY1305_SHA256: 100 (20.00%)
 
-Protocol distribution:
-  - QUIC: 600 (60.00%)
-  - TLSv1.3: 300 (30.00%)
-  - TLSv1.2: 100 (10.00%)
+ServerHello Protocol distribution:
+  - TLSv1.3: 300 (60.00%)
+  - QUIC: 200 (40.00%)
 
-SrcPort distribution (Top 10):
-   1. Port 443: 800 (80.00%)
-   2. Port 8443: 200 (20.00%)
+ServerHello SrcPort distribution (Top 10):
+   1. Port 443: 400 (80.00%)
+   2. Port 8443: 100 (20.00%)
+
+=== ClientHello Analysis ===
+
+Total ClientHello packets: 300
+PQC packets: 45
+PQC utilization rate: 15.00%
+
+=== PQC ClientHello Packet Analysis ===
+
+PQC ClientHello SupportedGroups usage frequency (Top 10):
+  1. X25519MLKEM768: 30 (10.00%)
+  2. P256Kyber1024: 15 (5.00%)
+
+PQC ClientHello packet Protocol distribution:
+  - TLS: 30 (66.67%)
+  - QUIC: 15 (33.33%)
+
+PQC ClientHello packet DstPort distribution (Top 10):
+   1. Port 443: 36 (80.00%)
+   2. Port 8443: 9 (20.00%)
+
+=== All ClientHello Packet Analysis ===
+
+ClientHello Protocol distribution:
+  - TLS: 200 (66.67%)
+  - QUIC: 100 (33.33%)
+
+ClientHello DstPort distribution (Top 10):
+   1. Port 443: 240 (80.00%)
+   2. Port 8443: 60 (20.00%)
+```
+
+### PQC Server List (optional)
+```
+example.com:443
+api.example.com:8443
+secure.example.org:443
+pqc-test.example.net:9443
 ```
 
 ## Requirements
@@ -233,8 +290,8 @@ SrcPort distribution (Top 10):
 
 ```
 PQC-Detector/
-├── detector.py              # Main pcap analysis tool
-├── summary.py               # Statistical analysis tool
+├── detector.py              # Main pcap analysis tool (ServerHello/ClientHello)
+├── summary.py               # Statistical analysis tool with PQC server analysis
 ├── config.yaml              # Configuration file
 ├── requirements.txt         # Python dependencies
 ├── README.md               # This file
@@ -245,6 +302,7 @@ PQC-Detector/
 │   └── protocol_versions.yaml
 └── result/                 # Output directory (created automatically)
     └── YYYYMMDD_HHMMSS/   # Timestamped result directories
-        ├── *_serverhello.csv  # CSV output files
+        ├── *_serverhello.csv  # ServerHello CSV output files
+        ├── *_clienthello.csv  # ClientHello CSV output files
         └── detector.log   # Log files with memory usage monitoring
 ```

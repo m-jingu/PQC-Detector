@@ -49,17 +49,35 @@ def load_mappings(mappings_dir: Path) -> Tuple[Dict, Dict, Dict]:
     return supported_groups, cipher_suites, protocol_versions
 
 
-def read_csv_files(directory: Path) -> Generator[Dict, None, None]:
-    """Read all *_serverhello.csv files from directory and yield rows as dictionaries."""
-    for csv_file in directory.rglob("*_serverhello.csv"):
-        try:
-            with csv_file.open("r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    yield row
-        except Exception as e:
-            print(f"Warning: Failed to read {csv_file}: {e}", file=sys.stderr)
+def read_csv_files(directories: list) -> Generator[Tuple[Dict, str], None, None]:
+    """Read all *_serverhello.csv and *_clienthello.csv files from directories and yield (row, file_type) tuples."""
+    for directory in directories:
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            print(f"Warning: Directory {directory} does not exist", file=sys.stderr)
             continue
+            
+        # Read ServerHello files
+        for csv_file in dir_path.rglob("*_serverhello.csv"):
+            try:
+                with csv_file.open("r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        yield row, "serverhello"
+            except Exception as e:
+                print(f"Warning: Failed to read {csv_file}: {e}", file=sys.stderr)
+                continue
+        
+        # Read ClientHello files
+        for csv_file in dir_path.rglob("*_clienthello.csv"):
+            try:
+                with csv_file.open("r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        yield row, "clienthello"
+            except Exception as e:
+                print(f"Warning: Failed to read {csv_file}: {e}", file=sys.stderr)
+                continue
 
 
 def normalize_group_id(group_id: str) -> int:
@@ -104,6 +122,22 @@ def normalize_cipher_id(cipher_id: str) -> int:
         return None
 
 
+def is_pqc_supported_groups(supported_groups_str: str, supported_groups_mapping: Dict) -> bool:
+    """Check if SupportedGroups string contains PQC groups."""
+    if not supported_groups_str or supported_groups_str.strip() == "":
+        return False
+    
+    # Split by comma and check each group
+    groups = [g.strip() for g in supported_groups_str.split(",") if g.strip()]
+    for group in groups:
+        normalized_id = normalize_group_id(group)
+        if normalized_id is not None:
+            group_info = supported_groups_mapping.get(normalized_id, {})
+            if group_info.get('is_pqc', False):
+                return True
+    return False
+
+
 def normalize_protocol_name(proto: str, protocol_versions: Dict) -> str:
     """Convert protocol name to human-readable format using protocol versions mapping."""
     if not proto or proto.strip() == "":
@@ -139,178 +173,411 @@ def normalize_protocol_name(proto: str, protocol_versions: Dict) -> str:
         return proto
 
 
-def calculate_statistics(rows: Generator[Dict, None, None], 
+def calculate_statistics(rows: Generator[Tuple[Dict, str], None, None], 
                         supported_groups: Dict, 
                         cipher_suites: Dict,
-                        protocol_versions: Dict) -> Dict:
+                        protocol_versions: Dict,
+                        enable_pqc_servers: bool = False) -> Dict:
     """Calculate statistics from CSV rows."""
     stats = {
-        'total_packets': 0,
-        'pqc_packets': 0,
-        'group_counts': Counter(),
-        'cipher_counts': Counter(),
-        'protocol_counts': Counter(),
-        'srcport_counts': Counter(),
-        'pqc_srcport_counts': Counter(),
-        'pqc_cipher_counts': Counter(),
-        'pqc_protocol_counts': Counter(),
-        'pqc_groups': set(),
-        'group_names': {},
-        'cipher_names': {}
+        # ServerHello statistics
+        'serverhello_total': 0,
+        'serverhello_pqc': 0,
+        'serverhello_group_counts': Counter(),
+        'serverhello_cipher_counts': Counter(),
+        'serverhello_protocol_counts': Counter(),
+        'serverhello_srcport_counts': Counter(),
+        'serverhello_dstport_counts': Counter(),
+        'serverhello_pqc_srcport_counts': Counter(),
+        'serverhello_pqc_dstport_counts': Counter(),
+        'serverhello_pqc_cipher_counts': Counter(),
+        'serverhello_pqc_protocol_counts': Counter(),
+        'serverhello_pqc_groups': set(),
+        'serverhello_group_names': {},
+        'serverhello_cipher_names': {},
+        
+        # ClientHello statistics
+        'clienthello_total': 0,
+        'clienthello_pqc': 0,
+        'clienthello_group_counts': Counter(),
+        'clienthello_protocol_counts': Counter(),
+        'clienthello_srcport_counts': Counter(),
+        'clienthello_dstport_counts': Counter(),
+        'clienthello_pqc_srcport_counts': Counter(),
+        'clienthello_pqc_dstport_counts': Counter(),
+        'clienthello_pqc_protocol_counts': Counter(),
+        'clienthello_pqc_groups': set(),
+        'clienthello_group_names': {},
+        
+        # Packet matching and PQC server analysis
+        'serverhello_packets': [],  # Store ServerHello packets for matching
+        'clienthello_packets': [],  # Store ClientHello packets for matching
+        'pqc_servers': set()  # Set of "ServerName:Port" for PQC servers
     }
     
-    for row in rows:
-        stats['total_packets'] += 1
-        
+    for row, file_type in rows:
         # Protocol distribution
         proto = row.get('Proto', '').strip()
         if proto:
-            stats['protocol_counts'][proto] += 1
+            if file_type == "serverhello":
+                stats['serverhello_protocol_counts'][proto] += 1
+            else:
+                stats['clienthello_protocol_counts'][proto] += 1
         
         # SrcPort distribution
         srcport = row.get('SrcPort', '').strip()
         if srcport:
-            stats['srcport_counts'][srcport] += 1
+            if file_type == "serverhello":
+                stats['serverhello_srcport_counts'][srcport] += 1
+            else:
+                stats['clienthello_srcport_counts'][srcport] += 1
         
-        # KeyShareGroup analysis
-        group_id = row.get('KeyShareGroup', '').strip()
+        # DstPort distribution
+        dstport = row.get('DstPort', '').strip()
+        if dstport:
+            if file_type == "serverhello":
+                stats['serverhello_dstport_counts'][dstport] += 1
+            else:
+                stats['clienthello_dstport_counts'][dstport] += 1
+        
         is_pqc_packet = False
-        if group_id:
-            normalized_id = normalize_group_id(group_id)
-            if normalized_id is not None:
-                group_info = supported_groups.get(normalized_id, {})
-                group_name = group_info.get('name', f"Unknown({group_id})")
-                is_pqc = group_info.get('is_pqc', False)
-                
-                stats['group_counts'][group_name] += 1
-                stats['group_names'][group_name] = group_id
-                
-                if is_pqc:
-                    stats['pqc_packets'] += 1
-                    stats['pqc_groups'].add(group_name)
-                    is_pqc_packet = True
         
-        # CipherSuite analysis
-        cipher_id = row.get('CipherSuite', '').strip()
-        if cipher_id:
-            normalized_id = normalize_cipher_id(cipher_id)
-            if normalized_id is not None:
-                cipher_info = cipher_suites.get(normalized_id, {})
-                cipher_name = cipher_info.get('name', f"Unknown({cipher_id})")
+        # Update total counts
+        if file_type == "serverhello":
+            stats['serverhello_total'] += 1
+            # Store ServerHello packet for matching (only if PQC server analysis is enabled)
+            if enable_pqc_servers:
+                stats['serverhello_packets'].append({
+                    'src': row.get('Src', '').strip(),
+                    'srcport': row.get('SrcPort', '').strip(),
+                    'dst': row.get('Dst', '').strip(),
+                    'dstport': row.get('DstPort', '').strip(),
+                    'keysharegroup': row.get('KeyShareGroup', '').strip(),
+                    'frame': row.get('Frame', '').strip()
+                })
+        else:
+            stats['clienthello_total'] += 1
+            # Store ClientHello packet for matching (only if PQC server analysis is enabled)
+            if enable_pqc_servers:
+                stats['clienthello_packets'].append({
+                    'src': row.get('Src', '').strip(),
+                    'srcport': row.get('SrcPort', '').strip(),
+                    'dst': row.get('Dst', '').strip(),
+                    'dstport': row.get('DstPort', '').strip(),
+                    'supportedgroups': row.get('SupportedGroups', '').strip(),
+                    'servername': row.get('ServerName', '').strip(),
+                    'frame': row.get('Frame', '').strip()
+                })
+        
+        if file_type == "serverhello":
+            # ServerHello analysis: KeyShareGroup and CipherSuite
+            group_id = row.get('KeyShareGroup', '').strip()
+            if group_id:
+                normalized_id = normalize_group_id(group_id)
+                if normalized_id is not None:
+                    group_info = supported_groups.get(normalized_id, {})
+                    group_name = group_info.get('name', f"Unknown({group_id})")
+                    is_pqc = group_info.get('is_pqc', False)
+                    
+                    stats['serverhello_group_counts'][group_name] += 1
+                    stats['serverhello_group_names'][group_name] = group_id
+                    
+                    if is_pqc:
+                        stats['serverhello_pqc'] += 1
+                        stats['serverhello_pqc_groups'].add(group_name)
+                        is_pqc_packet = True
+            
+            # CipherSuite analysis
+            cipher_id = row.get('CipherSuite', '').strip()
+            if cipher_id:
+                normalized_id = normalize_cipher_id(cipher_id)
+                if normalized_id is not None:
+                    cipher_info = cipher_suites.get(normalized_id, {})
+                    cipher_name = cipher_info.get('name', f"Unknown({cipher_id})")
+                    
+                    stats['serverhello_cipher_counts'][cipher_name] += 1
+                    stats['serverhello_cipher_names'][cipher_name] = cipher_id
+                    
+                    # PQC packet CipherSuite analysis
+                    if is_pqc_packet:
+                        stats['serverhello_pqc_cipher_counts'][cipher_name] += 1
+        
+        elif file_type == "clienthello":
+            # ClientHello analysis: SupportedGroups
+            supported_groups_str = row.get('SupportedGroups', '').strip()
+            if supported_groups_str:
+                # Check if any of the supported groups are PQC
+                if is_pqc_supported_groups(supported_groups_str, supported_groups):
+                    stats['clienthello_pqc'] += 1
+                    is_pqc_packet = True
                 
-                stats['cipher_counts'][cipher_name] += 1
-                stats['cipher_names'][cipher_name] = cipher_id
-                
-                # PQC packet CipherSuite analysis
-                if is_pqc_packet:
-                    stats['pqc_cipher_counts'][cipher_name] += 1
+                # Parse and count individual groups
+                groups = [g.strip() for g in supported_groups_str.split(",") if g.strip()]
+                for group in groups:
+                    normalized_id = normalize_group_id(group)
+                    if normalized_id is not None:
+                        group_info = supported_groups.get(normalized_id, {})
+                        group_name = group_info.get('name', f"Unknown({group})")
+                        stats['clienthello_group_counts'][group_name] += 1
+                        stats['clienthello_group_names'][group_name] = group
+                        
+                        if group_info.get('is_pqc', False):
+                            stats['clienthello_pqc_groups'].add(group_name)
         
         # PQC packet specific analysis
         if is_pqc_packet:
-            # PQC packet SrcPort analysis
-            if srcport:
-                stats['pqc_srcport_counts'][srcport] += 1
-            
-            # PQC packet Protocol analysis
-            if proto:
-                stats['pqc_protocol_counts'][proto] += 1
+            if file_type == "serverhello":
+                # ServerHello PQC packet analysis
+                if srcport:
+                    stats['serverhello_pqc_srcport_counts'][srcport] += 1
+                if dstport:
+                    stats['serverhello_pqc_dstport_counts'][dstport] += 1
+                if proto:
+                    stats['serverhello_pqc_protocol_counts'][proto] += 1
+            else:
+                # ClientHello PQC packet analysis
+                if srcport:
+                    stats['clienthello_pqc_srcport_counts'][srcport] += 1
+                if dstport:
+                    stats['clienthello_pqc_dstport_counts'][dstport] += 1
+                if proto:
+                    stats['clienthello_pqc_protocol_counts'][proto] += 1
+    
+    # Perform packet matching and PQC server analysis (only if enabled)
+    if enable_pqc_servers:
+        analyze_pqc_servers(stats, supported_groups)
     
     return stats
+
+
+def analyze_pqc_servers(stats: Dict, supported_groups: Dict) -> None:
+    """Analyze PQC servers by matching ServerHello and ClientHello packets."""
+    # Create a mapping of ClientHello packets by (src, srcport, dst, dstport)
+    clienthello_map = {}
+    for ch_pkt in stats['clienthello_packets']:
+        key = (ch_pkt['src'], ch_pkt['srcport'], ch_pkt['dst'], ch_pkt['dstport'])
+        if key not in clienthello_map:
+            clienthello_map[key] = []
+        clienthello_map[key].append(ch_pkt)
+    
+    # Statistics for debugging
+    matched_serverhello = 0
+    unmatched_serverhello = 0
+    pqc_serverhello = 0
+    pqc_with_servername = 0
+    
+    # Match ServerHello packets with ClientHello packets
+    # ServerHello(src, srcport) should match ClientHello(dst, dstport)
+    for sh_pkt in stats['serverhello_packets']:
+        key = (sh_pkt['dst'], sh_pkt['dstport'], sh_pkt['src'], sh_pkt['srcport'])
+        
+        if key in clienthello_map:
+            matched_serverhello += 1
+            # Check if ServerHello has PQC KeyShareGroup
+            sh_group_id = sh_pkt['keysharegroup']
+            if sh_group_id:
+                normalized_id = normalize_group_id(sh_group_id)
+                if normalized_id is not None:
+                    group_info = supported_groups.get(normalized_id, {})
+                    if group_info.get('is_pqc', False):
+                        pqc_serverhello += 1
+                        # Found PQC ServerHello, check corresponding ClientHello packets
+                        for ch_pkt in clienthello_map[key]:
+                            servername = ch_pkt['servername']
+                            if servername:
+                                pqc_with_servername += 1
+                                # Add to PQC servers set
+                                server_entry = f"{servername}:{sh_pkt['srcport']}"
+                                stats['pqc_servers'].add(server_entry)
+        else:
+            unmatched_serverhello += 1
+    
+    # Print analysis statistics
+    print(f"PQC Server Analysis:", file=sys.stderr)
+    print(f"  ServerHello packets: {len(stats['serverhello_packets'])}", file=sys.stderr)
+    print(f"  ClientHello packets: {len(stats['clienthello_packets'])}", file=sys.stderr)
+    print(f"  Matched pairs: {matched_serverhello}", file=sys.stderr)
+    print(f"  Unmatched ServerHello: {unmatched_serverhello}", file=sys.stderr)
+    print(f"  PQC ServerHello: {pqc_serverhello}", file=sys.stderr)
+    print(f"  PQC servers with names: {pqc_with_servername}", file=sys.stderr)
+    print(f"  Final PQC servers: {len(stats['pqc_servers'])}", file=sys.stderr)
 
 
 def format_output(stats: Dict, protocol_versions: Dict) -> str:
     """Format statistics into human-readable text output."""
     output = []
-    output.append("=== PQC Detection Summary ===")
+    
+    # ServerHello Analysis
+    output.append("=== ServerHello Analysis ===")
     output.append("")
     
-    # Basic statistics
-    total = stats['total_packets']
-    pqc = stats['pqc_packets']
-    pqc_rate = (pqc / total * 100) if total > 0 else 0
+    serverhello_total = stats['serverhello_total']
+    serverhello_pqc = stats['serverhello_pqc']
+    serverhello_pqc_rate = (serverhello_pqc / serverhello_total * 100) if serverhello_total > 0 else 0
     
-    output.append(f"Total ServerHello packets: {total:,}")
-    output.append(f"PQC packets: {pqc:,}")
-    output.append(f"PQC utilization rate: {pqc_rate:.2f}%")
+    output.append(f"Total ServerHello packets: {serverhello_total:,}")
+    output.append(f"PQC packets: {serverhello_pqc:,}")
+    output.append(f"PQC utilization rate: {serverhello_pqc_rate:.2f}%")
     output.append("")
     
-    
-    # PQC packet specific analysis
-    if pqc > 0:
-        output.append("=== PQC Packet Analysis ===")
+    if serverhello_pqc > 0:
+        output.append("=== PQC ServerHello Packet Analysis ===")
         output.append("")
         
-        # PQC NamedGroups usage frequency (Top 10)
-        pqc_group_counts = {name: count for name, count in stats['group_counts'].items() 
-                           if name in stats['pqc_groups']}
-        if pqc_group_counts:
-            output.append("PQC NamedGroups usage frequency (Top 10):")
-            for i, (group, count) in enumerate(sorted(pqc_group_counts.items(), 
+        # PQC ServerHello NamedGroups usage frequency (Top 10)
+        pqc_serverhello_group_counts = {name: count for name, count in stats['serverhello_group_counts'].items() 
+                                       if name in stats['serverhello_pqc_groups']}
+        if pqc_serverhello_group_counts:
+            output.append("PQC ServerHello NamedGroups usage frequency (Top 10):")
+            for i, (group, count) in enumerate(sorted(pqc_serverhello_group_counts.items(), 
                                                     key=lambda x: x[1], reverse=True)[:10], 1):
-                percentage = (count / total * 100) if total > 0 else 0
+                percentage = (count / serverhello_total * 100) if serverhello_total > 0 else 0
                 output.append(f"  {i}. {group}: {count:,} ({percentage:.2f}%)")
             output.append("")
         
-        # PQC packet CipherSuite distribution (Top 10)
-        if stats['pqc_cipher_counts']:
-            output.append("PQC packet CipherSuite distribution (Top 10):")
-            for i, (cipher, count) in enumerate(sorted(stats['pqc_cipher_counts'].items(), 
+        # PQC ServerHello packet CipherSuite distribution (Top 10)
+        if stats['serverhello_pqc_cipher_counts']:
+            output.append("PQC ServerHello packet CipherSuite distribution (Top 10):")
+            for i, (cipher, count) in enumerate(sorted(stats['serverhello_pqc_cipher_counts'].items(), 
                                                      key=lambda x: x[1], reverse=True)[:10], 1):
-                percentage = (count / pqc * 100) if pqc > 0 else 0
+                percentage = (count / serverhello_pqc * 100) if serverhello_pqc > 0 else 0
                 output.append(f"  {i:2d}. {cipher}: {count:,} ({percentage:.2f}%)")
             output.append("")
         
-        # PQC packet Protocol distribution
-        if stats['pqc_protocol_counts']:
-            output.append("PQC packet Protocol distribution:")
-            for proto, count in sorted(stats['pqc_protocol_counts'].items(), 
+        # PQC ServerHello packet Protocol distribution
+        if stats['serverhello_pqc_protocol_counts']:
+            output.append("PQC ServerHello packet Protocol distribution:")
+            for proto, count in sorted(stats['serverhello_pqc_protocol_counts'].items(), 
                                      key=lambda x: x[1], reverse=True):
-                percentage = (count / pqc * 100) if pqc > 0 else 0
+                percentage = (count / serverhello_pqc * 100) if serverhello_pqc > 0 else 0
                 readable_proto = normalize_protocol_name(proto, protocol_versions)
                 output.append(f"  - {readable_proto}: {count:,} ({percentage:.2f}%)")
             output.append("")
         
-        # PQC packet SrcPort distribution (Top 10)
-        if stats['pqc_srcport_counts']:
-            output.append("PQC packet SrcPort distribution (Top 10):")
-            for i, (port, count) in enumerate(sorted(stats['pqc_srcport_counts'].items(), 
+        # PQC ServerHello packet SrcPort distribution (Top 10)
+        if stats['serverhello_pqc_srcport_counts']:
+            output.append("PQC ServerHello packet SrcPort distribution (Top 10):")
+            for i, (port, count) in enumerate(sorted(stats['serverhello_pqc_srcport_counts'].items(), 
                                                    key=lambda x: x[1], reverse=True)[:10], 1):
-                percentage = (count / pqc * 100) if pqc > 0 else 0
+                percentage = (count / serverhello_pqc * 100) if serverhello_pqc > 0 else 0
                 output.append(f"  {i:2d}. Port {port}: {count:,} ({percentage:.2f}%)")
             output.append("")
     
-    # All packet analysis
-    output.append("=== All Packet Analysis ===")
+    # All ServerHello packet analysis
+    output.append("=== All ServerHello Packet Analysis ===")
     output.append("")
     
-    # CipherSuite usage frequency (Top 10) - All packets
-    if stats['cipher_counts']:
-        output.append("CipherSuite usage frequency (Top 10):")
-        for i, (cipher, count) in enumerate(stats['cipher_counts'].most_common(10), 1):
-            percentage = (count / total * 100) if total > 0 else 0
+    # ServerHello CipherSuite usage frequency (Top 10)
+    if stats['serverhello_cipher_counts']:
+        output.append("ServerHello CipherSuite usage frequency (Top 10):")
+        for i, (cipher, count) in enumerate(stats['serverhello_cipher_counts'].most_common(10), 1):
+            percentage = (count / serverhello_total * 100) if serverhello_total > 0 else 0
             output.append(f"  {i}. {cipher}: {count:,} ({percentage:.2f}%)")
         output.append("")
     
-    # Protocol distribution - All packets
-    if stats['protocol_counts']:
-        output.append("Protocol distribution:")
-        for proto, count in sorted(stats['protocol_counts'].items(), 
+    # ServerHello Protocol distribution
+    if stats['serverhello_protocol_counts']:
+        output.append("ServerHello Protocol distribution:")
+        for proto, count in sorted(stats['serverhello_protocol_counts'].items(), 
                                  key=lambda x: x[1], reverse=True):
-            percentage = (count / total * 100) if total > 0 else 0
+            percentage = (count / serverhello_total * 100) if serverhello_total > 0 else 0
             readable_proto = normalize_protocol_name(proto, protocol_versions)
             output.append(f"  - {readable_proto}: {count:,} ({percentage:.2f}%)")
         output.append("")
     
-    # SrcPort distribution (Top 10) - All packets
-    if stats['srcport_counts']:
-        output.append("SrcPort distribution (Top 10):")
-        for i, (port, count) in enumerate(sorted(stats['srcport_counts'].items(), 
+    # ServerHello SrcPort distribution (Top 10)
+    if stats['serverhello_srcport_counts']:
+        output.append("ServerHello SrcPort distribution (Top 10):")
+        for i, (port, count) in enumerate(sorted(stats['serverhello_srcport_counts'].items(), 
                                                key=lambda x: x[1], reverse=True)[:10], 1):
-            percentage = (count / total * 100) if total > 0 else 0
+            percentage = (count / serverhello_total * 100) if serverhello_total > 0 else 0
+            output.append(f"  {i:2d}. Port {port}: {count:,} ({percentage:.2f}%)")
+        output.append("")
+    
+    # ClientHello Analysis
+    output.append("=== ClientHello Analysis ===")
+    output.append("")
+    
+    clienthello_total = stats['clienthello_total']
+    clienthello_pqc = stats['clienthello_pqc']
+    clienthello_pqc_rate = (clienthello_pqc / clienthello_total * 100) if clienthello_total > 0 else 0
+    
+    output.append(f"Total ClientHello packets: {clienthello_total:,}")
+    output.append(f"PQC packets: {clienthello_pqc:,}")
+    output.append(f"PQC utilization rate: {clienthello_pqc_rate:.2f}%")
+    output.append("")
+    
+    if clienthello_pqc > 0:
+        output.append("=== PQC ClientHello Packet Analysis ===")
+        output.append("")
+        
+        # PQC ClientHello SupportedGroups usage frequency (Top 10)
+        pqc_clienthello_group_counts = {name: count for name, count in stats['clienthello_group_counts'].items() 
+                                       if name in stats['clienthello_pqc_groups']}
+        if pqc_clienthello_group_counts:
+            output.append("PQC ClientHello SupportedGroups usage frequency (Top 10):")
+            for i, (group, count) in enumerate(sorted(pqc_clienthello_group_counts.items(), 
+                                                    key=lambda x: x[1], reverse=True)[:10], 1):
+                percentage = (count / clienthello_total * 100) if clienthello_total > 0 else 0
+                output.append(f"  {i}. {group}: {count:,} ({percentage:.2f}%)")
+            output.append("")
+        
+        # PQC ClientHello packet Protocol distribution
+        if stats['clienthello_pqc_protocol_counts']:
+            output.append("PQC ClientHello packet Protocol distribution:")
+            for proto, count in sorted(stats['clienthello_pqc_protocol_counts'].items(), 
+                                     key=lambda x: x[1], reverse=True):
+                percentage = (count / clienthello_pqc * 100) if clienthello_pqc > 0 else 0
+                readable_proto = normalize_protocol_name(proto, protocol_versions)
+                output.append(f"  - {readable_proto}: {count:,} ({percentage:.2f}%)")
+            output.append("")
+        
+        # PQC ClientHello packet DstPort distribution (Top 10)
+        if stats['clienthello_pqc_dstport_counts']:
+            output.append("PQC ClientHello packet DstPort distribution (Top 10):")
+            for i, (port, count) in enumerate(sorted(stats['clienthello_pqc_dstport_counts'].items(), 
+                                                   key=lambda x: x[1], reverse=True)[:10], 1):
+                percentage = (count / clienthello_pqc * 100) if clienthello_pqc > 0 else 0
+                output.append(f"  {i:2d}. Port {port}: {count:,} ({percentage:.2f}%)")
+            output.append("")
+    
+    # All ClientHello packet analysis
+    output.append("=== All ClientHello Packet Analysis ===")
+    output.append("")
+    
+    # ClientHello Protocol distribution
+    if stats['clienthello_protocol_counts']:
+        output.append("ClientHello Protocol distribution:")
+        for proto, count in sorted(stats['clienthello_protocol_counts'].items(), 
+                                 key=lambda x: x[1], reverse=True):
+            percentage = (count / clienthello_total * 100) if clienthello_total > 0 else 0
+            readable_proto = normalize_protocol_name(proto, protocol_versions)
+            output.append(f"  - {readable_proto}: {count:,} ({percentage:.2f}%)")
+        output.append("")
+    
+    # ClientHello DstPort distribution (Top 10)
+    if stats['clienthello_dstport_counts']:
+        output.append("ClientHello DstPort distribution (Top 10):")
+        for i, (port, count) in enumerate(sorted(stats['clienthello_dstport_counts'].items(), 
+                                               key=lambda x: x[1], reverse=True)[:10], 1):
+            percentage = (count / clienthello_total * 100) if clienthello_total > 0 else 0
             output.append(f"  {i:2d}. Port {port}: {count:,} ({percentage:.2f}%)")
         output.append("")
     
     return "\n".join(output)
+
+
+def write_pqc_servers_file(stats: Dict, output_path: str) -> None:
+    """Write PQC servers list to file."""
+    if not stats['pqc_servers']:
+        return
+    
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with output_path.open("w", encoding="utf-8") as f:
+        for server in sorted(stats['pqc_servers']):
+            f.write(f"{server}\n")
 
 
 def parse_args(argv=None) -> argparse.Namespace:
@@ -319,15 +586,23 @@ def parse_args(argv=None) -> argparse.Namespace:
         description="Analyze CSV files from detector.py output and generate PQC statistics"
     )
     parser.add_argument(
-        "directory", 
+        "directories", 
+        nargs="+",
         type=str, 
-        help="Directory containing *_serverhello.csv files"
+        help="Directories containing *_serverhello.csv and *_clienthello.csv files"
     )
     parser.add_argument(
         "--config", 
         type=str, 
         default="config.yaml", 
         help="Configuration file path"
+    )
+    parser.add_argument(
+        "-p",
+        "--pqc-servers",
+        type=str,
+        metavar="FILE",
+        help="Enable PQC server analysis and output to specified file"
     )
     return parser.parse_args(argv)
 
@@ -350,6 +625,11 @@ def main(argv=None) -> int:
         print(f"Error: Mappings directory not found: {mappings_dir}", file=sys.stderr)
         return 1
     
+    # Validate PQC servers option
+    if args.pqc_servers and not args.pqc_servers.strip():
+        print("Error: --pqc-servers requires a file path", file=sys.stderr)
+        return 1
+    
     # Load mappings
     try:
         supported_groups, cipher_suites, protocol_versions = load_mappings(mappings_dir)
@@ -357,20 +637,26 @@ def main(argv=None) -> int:
         print(f"Error: Failed to load mappings: {e}", file=sys.stderr)
         return 1
     
-    # Process input directory
-    input_dir = Path(args.directory).resolve()
-    if not input_dir.exists():
-        print(f"Error: Input directory not found: {input_dir}", file=sys.stderr)
-        return 1
+    # Process input directories
+    input_dirs = [Path(d).resolve() for d in args.directories]
+    for input_dir in input_dirs:
+        if not input_dir.exists():
+            print(f"Error: Input directory not found: {input_dir}", file=sys.stderr)
+            return 1
     
     # Read CSV files and calculate statistics
     try:
-        rows = read_csv_files(input_dir)
-        stats = calculate_statistics(rows, supported_groups, cipher_suites, protocol_versions)
+        rows = read_csv_files(args.directories)
+        stats = calculate_statistics(rows, supported_groups, cipher_suites, protocol_versions, bool(args.pqc_servers))
         
         # Format and output results
         output = format_output(stats, protocol_versions)
         print(output)
+        
+        # Write PQC servers to file if enabled
+        if args.pqc_servers:
+            write_pqc_servers_file(stats, args.pqc_servers)
+            print(f"PQC servers list written to: {args.pqc_servers}", file=sys.stderr)
         
     except Exception as e:
         print(f"Error: Failed to process files: {e}", file=sys.stderr)
